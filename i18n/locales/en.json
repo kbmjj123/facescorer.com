@@ -1,0 +1,86 @@
+{
+  "meta": {
+    "title": "CardScan — Scan Business Cards in Bulk",
+    "description": "Upload multiple business cards. AI extracts contacts locally in your browser. Export to Excel, CSV, vCard. Free, no signup, 100% private."
+  },
+  "nav": {
+    "features": "Features",
+    "pricing": "Pricing",
+    "upgrade": "Upgrade Pro",
+    "lang_toggle": "中文"
+  },
+  "hero": {
+    "title": "Scan business cards in bulk.",
+    "title_highlight": "Export to Excel in seconds.",
+    "subtitle": "Upload up to 20 cards — AI runs in your browser, 100% private.",
+    "privacy_badge": "Local Processing — No uploads, no servers"
+  },
+  "model": {
+    "loading": "Loading AI model ({size}MB)...",
+    "ready": "Ready",
+    "cached": "Model cached — instant start",
+    "error": "Model load failed. Check your network and refresh."
+  },
+  "upload": {
+    "hint": "Drag & drop images here, or",
+    "hint_mobile": "Tap to photograph or select images",
+    "btn_camera": "Use Camera",
+    "btn_files": "Choose Files",
+    "btn_start": "Start Recognizing ({count})",
+    "quota": "Free: {used} / {limit} cards used this month",
+    "limit_reached": "Free limit reached. Upgrade to scan more.",
+    "format_error": "Unsupported format. Use JPG or PNG.",
+    "size_error": "Image too small (< 200px). Recognition may be poor."
+  },
+  "card": {
+    "field": {
+      "name": "Name",
+      "company": "Company",
+      "title": "Job Title",
+      "phone": "Phone",
+      "email": "Email",
+      "website": "Website",
+      "address": "Address",
+      "notes": "Notes"
+    },
+    "status": {
+      "pending": "Waiting...",
+      "processing": "Recognizing (~{seconds}s)...",
+      "done": "Done",
+      "error": "Failed — tap to retry"
+    },
+    "delete_confirm": "Remove this card?",
+    "confidence_low": "Low confidence — verify this field"
+  },
+  "export": {
+    "csv": "Export CSV",
+    "vcf": "Export vCard",
+    "excel": "Export Excel",
+    "excel_locked": "Export Excel",
+    "confirm": "Export {count} contacts to {format}?",
+    "success": "Exported {filename}",
+    "empty": "No contacts to export"
+  },
+  "modal": {
+    "upgrade": {
+      "title": "Unlock unlimited scanning",
+      "one_time": "$4.9 · 100 cards one-time",
+      "monthly": "$9 / month · Unlimited",
+      "yearly": "$79 / year · Best value",
+      "dismiss": "Maybe later"
+    }
+  },
+  "error": {
+    "title": "Error — CardScan",
+    "default_title": "Something went wrong",
+    "default_message": "An unexpected error occurred. Please try refreshing the page.",
+    "back_home": "Back to Home"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "loading": "Loading...",
+    "autosaved": "Autosaved",
+    "retry": "Retry"
+  }
+}

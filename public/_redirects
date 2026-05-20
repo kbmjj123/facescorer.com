@@ -1,0 +1,3 @@
+# Cloudflare Pages handles Nuxt SSG routes automatically.
+# Each route has its own .html file generated at build time.
+# No SPA fallback needed — Cloudflare resolves clean URLs by default.

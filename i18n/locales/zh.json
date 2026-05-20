@@ -1,0 +1,86 @@
+{
+  "meta": {
+    "title": "CardScan — 批量扫描名片，一键导出 Excel",
+    "description": "批量上传名片图片，AI 在浏览器本地识别，导出 Excel/CSV/vCard，免费无需注册。"
+  },
+  "nav": {
+    "features": "功能",
+    "pricing": "定价",
+    "upgrade": "升级 Pro",
+    "lang_toggle": "English"
+  },
+  "hero": {
+    "title": "批量扫描名片，",
+    "title_highlight": "几秒钟导出 Excel。",
+    "subtitle": "一次最多上传 20 张，AI 在你的浏览器里本地识别，数据不离开设备。",
+    "privacy_badge": "本地处理 — 不上传服务器，完全隐私"
+  },
+  "model": {
+    "loading": "正在加载 AI 模型 ({size}MB)...",
+    "ready": "已就绪",
+    "cached": "模型已缓存 — 即刻启动",
+    "error": "模型加载失败，请检查网络后刷新"
+  },
+  "upload": {
+    "hint": "拖拽名片图片到此处，或",
+    "hint_mobile": "点击拍照或从相册选择",
+    "btn_camera": "拍照",
+    "btn_files": "选择文件",
+    "btn_start": "开始识别（{count} 张）",
+    "quota": "免费额度：本月已用 {used} / {limit} 张",
+    "limit_reached": "免费额度已用完，升级后继续扫描。",
+    "format_error": "不支持该格式，请使用 JPG 或 PNG。",
+    "size_error": "图片太小（< 200px），识别效果可能较差。"
+  },
+  "card": {
+    "field": {
+      "name": "姓名",
+      "company": "公司",
+      "title": "职位",
+      "phone": "手机",
+      "email": "邮箱",
+      "website": "网址",
+      "address": "地址",
+      "notes": "备注"
+    },
+    "status": {
+      "pending": "等待中...",
+      "processing": "识别中（约 {seconds} 秒）...",
+      "done": "完成",
+      "error": "识别失败，点击重试"
+    },
+    "delete_confirm": "删除这张名片？",
+    "confidence_low": "识别不确定 — 请确认该字段"
+  },
+  "export": {
+    "csv": "导出 CSV",
+    "vcf": "导出 vCard",
+    "excel": "导出 Excel",
+    "excel_locked": "导出 Excel",
+    "confirm": "将 {count} 条联系人导出为 {format}？",
+    "success": "已导出 {filename}",
+    "empty": "没有可导出的联系人"
+  },
+  "modal": {
+    "upgrade": {
+      "title": "解锁无限识别次数",
+      "one_time": "¥35 · 100 张一次性套餐",
+      "monthly": "¥65 / 月 · 无限次",
+      "yearly": "¥560 / 年 · 最划算",
+      "dismiss": "稍后再说"
+    }
+  },
+  "error": {
+    "title": "错误 — CardScan",
+    "default_title": "出了点问题",
+    "default_message": "发生了意外错误，请尝试刷新页面。",
+    "back_home": "返回首页"
+  },
+  "common": {
+    "cancel": "取消",
+    "delete": "删除",
+    "loading": "加载中...",
+    "autosaved": "已自动保存",
+    "retry": "重试"
+  }
+}
