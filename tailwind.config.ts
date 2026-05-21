@@ -21,7 +21,7 @@ export default {
         },
       },
       fontFamily: {
-        heading: ['Satoshi', ...sansFallback],
+        heading: ['Inter', ...sansFallback],
         body: ['Inter', ...sansFallback],
       },
       fontSize: {

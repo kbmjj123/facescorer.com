@@ -2,56 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================
+   Design Tokens — MASTER.md v2.0 §5.1
+   ============================================ */
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 400ms;
+  --duration-reveal: 2000ms;
+}
+
 @layer base {
   html {
-    font-family: 'Open Sans', sans-serif;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Poppins', sans-serif;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    letter-spacing: -0.02em;
   }
 
   body {
-    @apply bg-[#F8FAFC] text-[#0F172A];
+    @apply bg-cream text-black;
+  }
+
+  /* All interactive elements get a minimum transition */
+  a, button, input, select, textarea, details {
+    transition: all var(--duration-fast) var(--ease-out);
   }
 
   /* Focus ring */
   *:focus-visible {
-    @apply outline-2 outline-offset-2 outline-[#1E3A5F];
+    @apply outline-2 outline-offset-2 outline-coral;
+  }
+
+  /* Reduced motion — kill all animations */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
 @layer components {
-  /* Card with design system styling */
+  /* Card surface */
   .card-surface {
-    @apply bg-white border border-[#E2E8F0] rounded-card shadow-card;
+    @apply bg-white border border-border rounded-xl shadow-card;
   }
 
-  /* Input base */
+  /* Input field */
   .input-field {
-    @apply px-3 py-2.5 border border-[#E2E8F0] rounded-button text-base
-           transition-colors duration-200
-           focus:border-[#1E3A5F] focus:ring-2 focus:ring-[#1E3A5F]/15 focus:outline-none;
-  }
-
-  /* Confidence border colors */
-  .confidence-high {
-    @apply border-l-2 border-l-emerald-400;
-  }
-
-  .confidence-medium {
-    @apply border-l-2 border-l-amber-400;
-  }
-
-  .confidence-low {
-    @apply border-l-2 border-l-red-400;
+    @apply px-3 py-2.5 border border-border rounded-md text-base
+           transition-colors duration-[var(--duration-fast)]
+           focus:border-coral focus:ring-2 focus:ring-coral/20 focus:outline-none;
   }
 }
 
 @layer utilities {
-  /* Safe area for mobile bottom bar */
+  /* Safe area for mobile */
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }

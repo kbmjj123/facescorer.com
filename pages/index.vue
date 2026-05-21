@@ -1,115 +1,206 @@
 <script setup lang="ts">
-const { t, locale } = useI18n()
-const switchLocalePath = useSwitchLocalePath()
-const router = useRouter()
+import type { FaceScore } from '~/components/FaceResult.vue'
+import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 
-const { scanFiles, scanning, modelLoaded, modelError } = useCardScanner()
-const { activatePlan } = useQuota()
+const { isReady, loadProgress, detect, error: modelError } = useFaceLandmarker()
+const { compute } = useFaceScoring()
 
-useHead({
-  title: t('meta.title'),
-  htmlAttrs: { lang: locale.value },
-  meta: [
-    { name: 'description', content: t('meta.description') },
-  ],
-})
+// ── Pipeline state ──
+const uploadedImage = ref<string | null>(null)
+const isProcessing = ref(false)
+const showCanvas = ref(false)
+const showResult = ref(false)
+const showShare = ref(false)
 
-// Payment return URL handling
-const showUpgradeModal = ref(false)
-const upgradeTrigger = ref('')
+const realLandmarks = ref<Array<{ x: number; y: number }>>([])
+const faceScore = ref<FaceScore | null>(null)
 
-onMounted(() => {
-  const params = new URLSearchParams(window.location.search)
-  if (params.get('payment') === 'success') {
-    const plan = params.get('plan')
-    if (plan === 'one-time' || plan === 'monthly' || plan === 'yearly') {
-      activatePlan(plan)
+// ── Photo quality flags ──
+const qualityWarning = ref<string | null>(null)
+const originalFile = ref<File | null>(null)
+
+// ── Handle upload ──
+async function handleFilesSelected(files: File[]) {
+  if (files.length === 0) return
+
+  const file = files[0]!
+  originalFile.value = file
+
+  // Clean previous
+  if (uploadedImage.value) URL.revokeObjectURL(uploadedImage.value)
+  uploadedImage.value = URL.createObjectURL(file)
+  isProcessing.value = true
+  qualityWarning.value = null
+  showCanvas.value = false
+  showResult.value = false
+  showShare.value = false
+
+  try {
+    // Convert HEIC if needed
+    let imageFile: Blob = file
+    if (file.type === 'image/heic' || file.name.toLowerCase().endsWith('.heic')) {
+      const heic2any = (await import('heic2any')).default
+      imageFile = await heic2any({ blob: file, toType: 'image/jpeg' }) as Blob
     }
-    router.replace({ query: {} })
+
+    // Load as HTMLImageElement for detection
+    const img = await loadImageElement(URL.createObjectURL(imageFile))
+
+    // Wait for model if not ready
+    if (!isReady.value) {
+      await new Promise<void>((resolve) => {
+        const stop = watch(isReady, (v) => {
+          if (v) { stop(); resolve() }
+        })
+      })
+    }
+
+    // Run face detection
+    const result = await detect(img)
+
+    // Quality checks
+    if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
+      qualityWarning.value = 'Please upload a clear front-facing photo'
+      isProcessing.value = false
+      return
+    }
+
+    if (result.faceLandmarks.length > 1) {
+      qualityWarning.value = 'Analyzing the closest face'
+    }
+
+    // Side-face check (via blendshapes if available)
+    if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
+      const bs = result.faceBlendshapes[0]!
+      // Find a yaw-related blendshape (approximate)
+      const yawIdx = bs.categories?.findIndex(c => c.categoryName === 'headYaw') ?? -1
+      if (yawIdx >= 0 && bs.categories![yawIdx]!.score > 0.4) {
+        qualityWarning.value = 'For best results, use a front-facing photo'
+      }
+    }
+
+    // Convert landmarks to simplified format
+    const lm = result.faceLandmarks[0]!
+    realLandmarks.value = lm.map((l: NormalizedLandmark) => ({ x: l.x, y: l.y }))
+
+    // Compute face score
+    faceScore.value = compute(result)
+
+    // Stop upload processing, show canvas animation
+    isProcessing.value = false
+    showCanvas.value = true
+  } catch (e) {
+    console.error('Detection failed:', e)
+    qualityWarning.value = 'Analysis failed, please try again'
+    isProcessing.value = false
   }
-})
-
-function handleStartScan(files: File[]) {
-  scanFiles(files)
 }
 
-function handleUpgradeRequest(trigger: string) {
-  upgradeTrigger.value = trigger
-  showUpgradeModal.value = true
+function loadImageElement(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('Failed to load image'))
+    img.src = url
+  })
 }
 
-const showHero = computed(() => !scanning.value && !modelError.value)
+function handleAnimationComplete() {
+  showResult.value = true
+
+  // Auto-generate share card after dimensions appear
+  setTimeout(() => {
+    showShare.value = true
+  }, 1000)
+}
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#F8FAFC] font-body">
-    <!-- Nav -->
-    <header class="sticky top-0 z-20 bg-[#F8FAFC]/95 backdrop-blur border-b border-border">
-      <nav class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <div class="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-            <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </div>
-          <span class="font-heading font-semibold text-[#0F172A] text-base">
-            CardScan
-          </span>
+  <div class="min-h-screen bg-cream">
+    <AppNav />
+
+    <!-- Model load progress bar -->
+    <div
+      v-if="!isReady"
+      class="fixed top-0 left-0 right-0 z-[100] h-[2px] bg-coral-light"
+    >
+      <div
+        class="h-full bg-coral transition-all duration-300 ease-out"
+        :style="{ width: `${loadProgress}%` }"
+      />
+    </div>
+
+    <main>
+      <Hero />
+      <FaceUploadZone
+        :processing="isProcessing"
+        @files-selected="handleFilesSelected"
+      />
+
+      <!-- Quality warnings -->
+      <div v-if="qualityWarning" class="px-4 pb-4">
+        <div class="max-w-lg mx-auto">
+          <p class="text-[14px] text-coral font-medium text-center bg-coral-light border border-coral/20 rounded-lg px-4 py-3">
+            {{ qualityWarning }}
+          </p>
         </div>
-
-        <div class="flex items-center gap-3">
-          <NuxtLink
-            :to="switchLocalePath(locale === 'en' ? 'zh' : 'en')"
-            class="text-xs font-medium text-muted-foreground hover:text-[#0F172A] transition-colors"
-          >
-            {{ t('nav.lang_toggle') }}
-          </NuxtLink>
-
-          <NuxtLink
-            to="/pricing"
-            class="text-xs font-medium text-[#1E3A5F] hover:text-primary-light transition-colors"
-          >
-            {{ t('nav.pricing') }}
-          </NuxtLink>
-        </div>
-      </nav>
-    </header>
-
-    <!-- Model Loading -->
-    <ModelLoader />
-
-    <!-- Hero (shown when no scanning) -->
-    <section v-if="showHero" class="px-4 pt-12 pb-8 md:pt-20 md:pb-12">
-      <div class="max-w-2xl mx-auto text-center">
-        <PrivacyBadge class="mb-6" />
-
-        <h1 class="text-3xl md:text-5xl font-heading font-bold text-[#0F172A] leading-tight tracking-tight">
-          {{ t('hero.title') }}
-          <span class="text-accent">{{ t('hero.title_highlight') }}</span>
-        </h1>
-
-        <p class="mt-4 text-base md:text-lg text-muted-foreground max-w-lg mx-auto leading-relaxed">
-          {{ t('hero.subtitle') }}
-        </p>
       </div>
-    </section>
 
-    <!-- Upload Zone -->
-    <section class="pt-4 pb-8">
-      <UploadZone @start="handleStartScan" />
-    </section>
+      <!-- Model error -->
+      <div v-if="modelError" class="px-4 pb-4">
+        <div class="max-w-lg mx-auto">
+          <p class="text-[14px] font-medium text-center bg-coral-light border border-coral/20 rounded-lg px-4 py-3">
+            {{ modelError }}
+          </p>
+        </div>
+      </div>
 
-    <!-- Results -->
-    <ResultList />
+      <template v-if="showCanvas && uploadedImage">
+        <!-- Canvas -->
+        <section class="px-4 pb-8">
+          <div class="max-w-lg mx-auto">
+            <FaceCanvas
+              :image-url="uploadedImage"
+              :landmarks="realLandmarks"
+              :canvas-width="400"
+              :canvas-height="400"
+              :playing="true"
+              class="aspect-square"
+              @animation-complete="handleAnimationComplete"
+            />
+          </div>
+        </section>
 
-    <!-- Export Bar (fixed bottom) -->
-    <ExportBar @upgrade="handleUpgradeRequest" />
+        <!-- Result -->
+        <FaceResult
+          v-if="faceScore"
+          :score="faceScore"
+          :visible="showResult"
+        />
 
-    <!-- Upgrade Modal -->
-    <UpgradeModal
-      :open="showUpgradeModal"
-      :trigger="upgradeTrigger"
-      @close="showUpgradeModal = false"
-    />
+        <!-- Share card -->
+        <ShareCard
+          v-if="faceScore"
+          :image-url="uploadedImage"
+          :label="faceScore.label"
+          :top-percent="faceScore.topPercent"
+          :visible="showShare"
+        />
+      </template>
+
+      <!-- Cross-promo -->
+      <CrossPromo />
+
+      <!-- FAQ -->
+      <FAQ />
+
+      <p class="text-center text-[11px] text-muted-fg mt-2">This tool is intended for users aged 13 and above.</p>
+
+      <!-- Footer -->
+      <footer class="py-8 text-center">
+        <p class="text-[12px] text-muted-fg">{{ $t('footer.text') }}</p>
+      </footer>
+    </main>
   </div>
 </template>

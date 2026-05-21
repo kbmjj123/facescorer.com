@@ -2,6 +2,8 @@
 export default defineNuxtConfig({
   ssr: false,
 
+  css: ['~/assets/css/main.css'],
+
   experimental: {
     viteEnvironmentApi: true,
   },
@@ -32,6 +34,7 @@ export default defineNuxtConfig({
     locales: [
       { code: 'en', language: 'en-US', file: 'en.json', name: 'English' },
       { code: 'zh', language: 'zh-CN', file: 'zh.json', name: '中文' },
+      { code: 'ja', language: 'ja-JP', file: 'ja.json', name: '日本語' },
     ],
     defaultLocale: 'en',
     strategy: 'prefix_except_default',
