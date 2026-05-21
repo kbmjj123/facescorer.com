@@ -9,77 +9,35 @@ const props = defineProps<{
   playing: boolean
 }>()
 
-const emit = defineEmits<{
-  animationComplete: []
-}>()
+const emit = defineEmits<{ animationComplete: [] }>()
 
-// ── Refs ──
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
+const imageLoaded = ref(false)
 
-// ── Animation state ──
 type Phase = 'idle' | 'landmarks' | 'lines' | 'done'
 const phase = ref<Phase>('idle')
 const revealedIndices = ref<Set<number>>(new Set())
 const lineProgress = ref([false, false, false, false])
-const linePhase = ref(0) // which line is currently animating (0-3), 4 = all done
+const linePhase = ref(0)
 
-// ── Mock landmarks (478 points, face-like distribution) ──
-function generateMockLandmarks(count: number) {
-  const points: Array<{ x: number; y: number }> = []
-  const cx = 0.5, cy = 0.45 // face center (normalized)
-  const rx = 0.28, ry = 0.38 // face ellipse radii
-
-  for (let i = 0; i < count; i++) {
-    // Distribute points with varying densities
-    const t = i / count
-    let px: number, py: number
-
-    if (t < 0.25) {
-      // Central cluster: eyes, nose, mouth area (high density)
-      const angle = Math.random() * Math.PI * 2
-      const dist = Math.random() * 0.12
-      px = cx + Math.cos(angle) * dist * 0.6
-      py = cy + Math.sin(angle) * dist
-    } else if (t < 0.55) {
-      // Mid face: eyebrows, cheekbones
-      const angle = Math.random() * Math.PI * 2
-      const dist = 0.08 + Math.random() * 0.18
-      px = cx + Math.cos(angle) * dist * 0.65
-      py = cy - 0.02 + Math.sin(angle) * dist * 0.9
-    } else if (t < 0.8) {
-      // Outer face: jaw, chin outline
-      const a = Math.random() * Math.PI * 2
-      const d = 0.92 + Math.random() * 0.08
-      px = cx + Math.cos(a) * rx * d
-      py = cy + Math.sin(a) * ry * d * 0.8
-    } else {
-      // Forehead and periphery
-      const a = Math.random() * Math.PI * 2
-      const d = 0.7 + Math.random() * 0.3
-      px = cx + Math.cos(a) * rx * d * 0.85
-      py = cy - 0.12 + Math.sin(a) * ry * d * 0.6
-    }
-
-    points.push({ x: Math.max(0, Math.min(1, px)), y: Math.max(0, Math.min(1, py)) })
-  }
-
-  return points
-}
-
-const allLandmarks = ref<Array<{ x: number; y: number }>>([])
-
-// ── Distance from center ──
+// ── Sort landmarks by distance from face center ──
 function distFromCenter(p: { x: number; y: number }): number {
-  const cx = 0.5, cy = 0.45
+  let cx = 0.5, cy = 0.45
+  const pts = props.landmarks
+  if (pts.length > 0) {
+    // Use actual mean center of all points
+    let sx = 0, sy = 0
+    for (const pt of pts) { sx += pt.x; sy += pt.y }
+    cx = sx / pts.length
+    cy = sy / pts.length
+  }
   return Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2)
 }
 
-// ── Sorted landmarks by distance ──
-const sortedLandmarks = computed(() => {
-  const pts = allLandmarks.value.length > 0 ? allLandmarks.value : props.landmarks
-  return [...pts].sort((a, b) => distFromCenter(a) - distFromCenter(b))
-})
+const sortedLandmarks = computed(() =>
+  [...props.landmarks].sort((a, b) => distFromCenter(a) - distFromCenter(b)),
+)
 
 // ── Canvas rendering ──
 const dpr = ref(1)
@@ -100,31 +58,21 @@ function render() {
   ctx.setTransform(dpr.value, 0, 0, dpr.value, 0, 0)
   ctx.clearRect(0, 0, props.canvasWidth, props.canvasHeight)
 
-  // Draw revealed points — use face bounds for positioning
   const pts = sortedLandmarks.value
-  const fb = faceBounds.value
   const w = props.canvasWidth
   const h = props.canvasHeight
 
   for (let i = 0; i < pts.length; i++) {
     if (!revealedIndices.value.has(i)) continue
     const p = pts[i]!
-    let px: number, py: number
-    if (fb) {
-      px = ((p.x - fb.x) / fb.w) * w
-      py = ((p.y - fb.y) / fb.h) * h
-    } else {
-      px = p.x * w
-      py = p.y * h
-    }
+    const px = p.x * w
+    const py = p.y * h
 
-    // White outer ring
     ctx.beginPath()
     ctx.arc(px, py, 2.5, 0, Math.PI * 2)
     ctx.fillStyle = 'rgba(255,255,255,0.4)'
     ctx.fill()
 
-    // Coral fill
     ctx.beginPath()
     ctx.arc(px, py, 1.5, 0, Math.PI * 2)
     ctx.fillStyle = 'rgba(228,91,60,0.85)'
@@ -132,141 +80,85 @@ function render() {
   }
 }
 
-// ── Face bounding box from real landmarks ──
-const faceBounds = computed(() => {
-  const pts = allLandmarks.value.length > 0 ? allLandmarks.value : props.landmarks
-  if (pts.length === 0) return null
-
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (const p of pts) {
-    if (p.x < minX) minX = p.x
-    if (p.y < minY) minY = p.y
-    if (p.x > maxX) maxX = p.x
-    if (p.y > maxY) maxY = p.y
-  }
-  // Add 10% padding
-  const padW = (maxX - minX) * 0.1
-  const padH = (maxY - minY) * 0.1
-  return {
-    x: Math.max(0, minX - padW),
-    y: Math.max(0, minY - padH),
-    w: Math.min(1, maxX - minX + padW * 2),
-    h: Math.min(1, maxY - minY + padH * 2),
-  }
-})
-
-// ── Key landmark accessor ──
-function getPt(idx: number): { x: number; y: number } | null {
-  const pts = allLandmarks.value.length > 0 ? allLandmarks.value : props.landmarks
-  if (pts.length <= idx) return null
-  const p = pts[idx]
+// ── Get key landmark position in canvas coords ──
+function lm(idx: number): { x: number; y: number } | null {
+  const p = props.landmarks[idx]
   if (!p) return null
-  const w = props.canvasWidth || 400
-  const h = props.canvasHeight || 400
-  const fb = faceBounds.value
-  if (fb) {
-    return {
-      x: ((p.x - fb.x) / fb.w) * w,
-      y: ((p.y - fb.y) / fb.h) * h,
-    }
-  }
-  return { x: p.x * w, y: p.y * h }
+  return { x: p.x * props.canvasWidth, y: p.y * props.canvasHeight }
 }
 
-// ── Computed line positions from actual landmarks ──
+// ── Line guides from real landmarks ──
 const lineGuides = computed(() => {
   const w = props.canvasWidth || 400
   const h = props.canvasHeight || 400
-  const fb = faceBounds.value
 
-  // Use real landmarks if available, otherwise fall back to ratios
-  const nose = getPt(1)         // nose tip → symmetry axis center
-  const forehead = getPt(10)    // hairline center
-  const chin = getPt(152)       // chin bottom
-  const leftEyeO = getPt(33)    // left eye outer
-  const leftEyeI = getPt(133)   // left eye inner
-  const rightEyeI = getPt(362)  // right eye inner
-  const rightEyeO = getPt(263)  // right eye outer
-  const leftMouth = getPt(61)   // left mouth corner
-  const rightMouth = getPt(291) // right mouth corner
+  const nose = lm(1)         // nose tip
+  const forehead = lm(10)    // hairline
+  const chin = lm(152)       // chin
+  const leo = lm(33)         // left eye outer
+  const rei = lm(362)        // right eye inner
+  const lmc = lm(61)         // left mouth
+  const rmc = lm(291)        // right mouth
 
-  // Symmetry axis: through nose tip, top to bottom
-  const centerX = nose?.x ?? w * 0.5
-  const topY = forehead?.y ?? h * 0.08
-  const bottomY = chin?.y ?? h * 0.82
+  const cx = nose?.x ?? w * 0.5
+  const top = forehead?.y ?? h * 0.08
+  const bot = chin?.y ?? h * 0.85
 
-  // Eye line: across face at eye level
-  const eyeY = leftEyeO?.y ?? h * 0.38
-  const eyeLeftX = fb ? fb.x * w : w * 0.10
-  const eyeRightX = fb ? (fb.x + fb.w) * w : w * 0.90
-
-  // Nose line: bottom of nose
+  // Eye line y: use average of eye and eyebrow landmarks around eyes
+  const eyeY = leo?.y ?? h * 0.38
   const noseY = nose?.y ?? h * 0.52
-  const mouthLeftX = leftMouth?.x ?? w * 0.30
-  const mouthRightX = rightMouth?.x ?? w * 0.70
+
+  const lx = Math.min(leo?.x ?? w * 0.12, lmc?.x ?? w * 0.2) - 20
+  const rx = Math.max(rei?.x ?? w * 0.88, rmc?.x ?? w * 0.8) + 20
 
   return {
-    line1: { x1: centerX, y1: topY, x2: centerX, y2: bottomY },
-    line2: { x1: eyeLeftX, y1: eyeY, x2: eyeRightX, y2: eyeY },
-    line3: { x1: eyeLeftX, y1: noseY, x2: eyeRightX, y2: noseY },
-    line4: { x1: mouthLeftX, y1: noseY + 10, x2: mouthRightX, y2: noseY + 10 },
+    line1: { x1: cx, y1: top, x2: cx, y2: bot },
+    line2: { x1: lx, y1: eyeY, x2: rx, y2: eyeY },
+    line3: { x1: lx, y1: noseY, x2: rx, y2: noseY },
+    line4: { x1: lx, y1: noseY + 14, x2: rx, y2: noseY + 14 },
   }
 })
 
-// ── Animation controller ──
+// ── Animation ──
 let animFrame: number | null = null
 let startTime = 0
 
 function startAnimation() {
-  // Reset
   revealedIndices.value.clear()
   linePhase.value = 0
   lineProgress.value = [false, false, false, false]
   phase.value = 'landmarks'
   startTime = performance.now()
 
-  // Phase 1: Landmark reveal via requestAnimationFrame with stagger
-  // We use a frame loop but control which points appear based on elapsed time
   function tick(now: number) {
     const elapsed = now - startTime
     const pts = sortedLandmarks.value
+    const total = pts.length
+    if (total === 0) return
 
-    // Determine which wave to reveal based on distance percentile
-    const totalPts = pts.length
-    if (totalPts === 0) return
-
-    // Wave 1: 0-600ms, distance percentile 0-33%
-    if (elapsed >= 0) {
-      const wave1Cutoff = Math.floor(totalPts * 0.33)
-      for (let i = 0; i < wave1Cutoff; i++) {
-        // progressive reveal within wave
-        const waveProgress = Math.min(1, elapsed / 600)
-        if ((i / wave1Cutoff) <= waveProgress) {
-          revealedIndices.value.add(i)
-        }
-      }
+    // Wave 1: 0–600ms, closest 33%
+    const w1e = Math.floor(total * 0.33)
+    const w1p = Math.min(1, elapsed / 600)
+    for (let i = 0; i < w1e; i++) {
+      if (i / w1e <= w1p) revealedIndices.value.add(i)
     }
 
-    // Wave 2: 400-1000ms, distance percentile 33-66%
+    // Wave 2: 400–1000ms, middle 33–66%
     if (elapsed >= 400) {
-      const wave2Start = Math.floor(totalPts * 0.33)
-      const wave2End = Math.floor(totalPts * 0.66)
-      const wave2Progress = Math.min(1, (elapsed - 400) / 600)
-      for (let i = wave2Start; i < wave2End; i++) {
-        if (((i - wave2Start) / (wave2End - wave2Start)) <= wave2Progress) {
-          revealedIndices.value.add(i)
-        }
+      const w2s = Math.floor(total * 0.33)
+      const w2e = Math.floor(total * 0.66)
+      const w2p = Math.min(1, (elapsed - 400) / 600)
+      for (let i = w2s; i < w2e; i++) {
+        if ((i - w2s) / (w2e - w2s) <= w2p) revealedIndices.value.add(i)
       }
     }
 
-    // Wave 3: 800-1800ms, distance percentile 66-100%
+    // Wave 3: 800–1800ms, outer 66–100%
     if (elapsed >= 800) {
-      const wave3Start = Math.floor(totalPts * 0.66)
-      const wave3Progress = Math.min(1, (elapsed - 800) / 1000)
-      for (let i = wave3Start; i < totalPts; i++) {
-        if (((i - wave3Start) / (totalPts - wave3Start)) <= wave3Progress) {
-          revealedIndices.value.add(i)
-        }
+      const w3s = Math.floor(total * 0.66)
+      const w3p = Math.min(1, (elapsed - 800) / 1000)
+      for (let i = w3s; i < total; i++) {
+        if ((i - w3s) / (total - w3s) <= w3p) revealedIndices.value.add(i)
       }
     }
 
@@ -275,11 +167,8 @@ function startAnimation() {
     if (elapsed < 1800) {
       animFrame = requestAnimationFrame(tick)
     } else {
-      // All landmarks revealed — start line phase after 600ms delay
       phase.value = 'lines'
-      setTimeout(() => {
-        startLines()
-      }, 600)
+      setTimeout(startLines, 600)
     }
   }
 
@@ -293,36 +182,25 @@ function startLines() {
 
 function animateNextLine() {
   if (linePhase.value >= 4) {
-    // All lines done — wait 200ms then emit complete
     setTimeout(() => {
       phase.value = 'done'
       emit('animationComplete')
     }, 200)
     return
   }
-
   lineProgress.value[linePhase.value] = true
-
-  // Each line takes 400ms
   setTimeout(() => {
     linePhase.value++
     animateNextLine()
   }, 400)
 }
 
-// ── Watch for start ──
-// Need both imageUrl ready AND playing=true to begin
+// ── Watch ──
 watch(
   [() => props.imageUrl, () => props.playing],
   ([url, play]) => {
-    if (url && play) {
-      if (allLandmarks.value.length === 0) {
-        allLandmarks.value = props.landmarks.length > 0 ? props.landmarks : generateMockLandmarks(478)
-      }
-      // Wait one tick for canvas ref to exist after v-if renders
-      nextTick(() => {
-        startAnimation()
-      })
+    if (url && play && props.landmarks.length > 0) {
+      nextTick(() => startAnimation())
     }
   },
   { immediate: true },
@@ -334,91 +212,64 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="containerRef" class="relative" :style="{ width: `${canvasWidth}px`, height: `${canvasHeight}px` }">
+  <div
+    ref="containerRef"
+    class="relative w-full overflow-hidden rounded-xl border border-border bg-black"
+    :style="{ aspectRatio: `${canvasWidth} / ${canvasHeight}` }"
+  >
     <!-- Photo layer -->
     <img
       :src="imageUrl"
       alt=""
-      class="absolute inset-0 w-full h-full object-cover"
+      class="absolute inset-0 w-full h-full object-contain"
+      @load="imageLoaded = true"
     >
 
-    <!-- Canvas: landmark dots -->
+    <!-- Canvas overlay -->
     <canvas
-      v-if="imageUrl"
+      v-if="imageUrl && imageLoaded"
       ref="canvasRef"
-      class="absolute inset-0"
+      class="absolute inset-0 w-full h-full"
       style="pointer-events: none;"
     />
 
-    <!-- SVG: measurement lines overlay -->
+    <!-- SVG measurement lines -->
     <svg
       v-if="phase === 'lines' || phase === 'done'"
       class="absolute inset-0"
       style="pointer-events: none;"
       :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`"
-      width="100%"
-      height="100%"
     >
-      <!-- Line 1: Symmetry axis (dashed vertical) -->
-      <line
-        v-if="lineProgress[0]"
+      <line v-if="lineProgress[0]"
         :x1="lineGuides.line1.x1" :y1="lineGuides.line1.y1"
         :x2="lineGuides.line1.x2" :y2="lineGuides.line1.y2"
-        stroke="#E45B3C"
-        stroke-opacity="0.7"
-        stroke-width="1.5"
-        stroke-dasharray="6 5"
-        class="line-anim"
-        style="animation: lineReveal 400ms var(--ease-out, cubic-bezier(0.16,1,0.3,1)) forwards;"
-      />
-      <!-- Line 2: Eye/brow line -->
-      <line
-        v-if="lineProgress[1]"
+        stroke="#E45B3C" stroke-opacity="0.6" stroke-width="1.5"
+        stroke-dasharray="6 5" class="line-anim" />
+      <line v-if="lineProgress[1]"
         :x1="lineGuides.line2.x1" :y1="lineGuides.line2.y1"
         :x2="lineGuides.line2.x2" :y2="lineGuides.line2.y2"
-        stroke="#E45B3C"
-        stroke-opacity="0.6"
-        stroke-width="1.5"
-        class="line-anim"
-        style="animation: lineReveal 400ms var(--ease-out, cubic-bezier(0.16,1,0.3,1)) forwards; animation-delay: 0ms;"
-      />
-      <!-- Line 3: Nose line -->
-      <line
-        v-if="lineProgress[2]"
+        stroke="#E45B3C" stroke-opacity="0.5" stroke-width="1.5"
+        class="line-anim" />
+      <line v-if="lineProgress[2]"
         :x1="lineGuides.line3.x1" :y1="lineGuides.line3.y1"
         :x2="lineGuides.line3.x2" :y2="lineGuides.line3.y2"
-        stroke="#E45B3C"
-        stroke-opacity="0.6"
-        stroke-width="1.5"
-        class="line-anim"
-        style="animation: lineReveal 400ms var(--ease-out, cubic-bezier(0.16,1,0.3,1)) forwards; animation-delay: 0ms;"
-      />
-      <!-- Line 4: Five-eye guide -->
-      <line
-        v-if="lineProgress[3]"
+        stroke="#E45B3C" stroke-opacity="0.5" stroke-width="1.5"
+        class="line-anim" />
+      <line v-if="lineProgress[3]"
         :x1="lineGuides.line4.x1" :y1="lineGuides.line4.y1"
         :x2="lineGuides.line4.x2" :y2="lineGuides.line4.y2"
-        stroke="#E45B3C"
-        stroke-opacity="0.5"
-        stroke-width="1.5"
-        class="line-anim"
-        style="animation: lineReveal 400ms var(--ease-out, cubic-bezier(0.16,1,0.3,1)) forwards; animation-delay: 0ms;"
-      />
+        stroke="#E45B3C" stroke-opacity="0.4" stroke-width="1.5"
+        class="line-anim" />
     </svg>
   </div>
 </template>
 
 <style scoped>
 @keyframes lineReveal {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
-
 .line-anim {
-  /* inline stroke attributes */
+  animation: lineReveal 400ms var(--ease-out, cubic-bezier(0.16,1,0.3,1)) forwards;
 }
 </style>
