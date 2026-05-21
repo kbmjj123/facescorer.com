@@ -128,7 +128,12 @@ async function handleFilesSelected(files: File[]) {
 async function cropFaceRegion(
   img: HTMLImageElement,
   landmarks: Array<{ x: number; y: number }>,
-  paddingRatio = 0.28,
+  padding = {
+    top: 0.55,     // 顶部大幅外扩，覆盖头顶到头发
+    bottom: 0.25,  // 底部包含下巴
+    left: 0.28,    // 两侧正常
+    right: 0.28,
+  },
 ): Promise<{
   croppedUrl: string
   remappedLandmarks: Array<{ x: number; y: number }>
@@ -136,7 +141,6 @@ async function cropFaceRegion(
   const imgW = img.naturalWidth
   const imgH = img.naturalHeight
 
-  // 计算所有关键点的边界框（归一化坐标）
   let minX = 1, minY = 1, maxX = 0, maxY = 0
   for (const p of landmarks) {
     if (p.x < minX) minX = p.x
@@ -145,40 +149,37 @@ async function cropFaceRegion(
     if (p.y > maxY) maxY = p.y
   }
 
-  // 加 padding 外扩
   const faceW = maxX - minX
   const faceH = maxY - minY
-  const padX = faceW * paddingRatio
-  const padY = faceH * paddingRatio
 
-  const cropX = Math.max(0, minX - padX)
-  const cropY = Math.max(0, minY - padY)
-  const cropW = Math.min(1 - cropX, faceW + padX * 2)
-  const cropH = Math.min(1 - cropY, faceH + padY * 2)
+  // 四个方向独立 padding
+  const cropX = Math.max(0, minX - faceW * padding.left)
+  const cropY = Math.max(0, minY - faceH * padding.top)    // 顶部大幅外扩
+  const cropR = Math.min(1, maxX + faceW * padding.right)
+  const cropB = Math.min(1, maxY + faceH * padding.bottom)
+  const cropW = cropR - cropX
+  const cropH = cropB - cropY
 
-  // 转换为像素坐标
+  // 像素坐标
   const px = Math.round(cropX * imgW)
   const py = Math.round(cropY * imgH)
   const pw = Math.round(cropW * imgW)
   const ph = Math.round(cropH * imgH)
 
-  // Canvas 裁剪
   const canvas = document.createElement('canvas')
   canvas.width = pw
   canvas.height = ph
   const ctx = canvas.getContext('2d')!
   ctx.drawImage(img, px, py, pw, ph, 0, 0, pw, ph)
 
-  // 生成裁剪后的 blob URL
   const croppedUrl = await new Promise<string>((resolve) => {
     canvas.toBlob(
-      (blob) => resolve(URL.createObjectURL(blob!)),
+      blob => resolve(URL.createObjectURL(blob!)),
       'image/jpeg',
       0.95,
     )
   })
 
-  // 重新映射关键点到裁剪后的坐标系
   const remappedLandmarks = landmarks.map(p => ({
     x: (p.x - cropX) / cropW,
     y: (p.y - cropY) / cropH,
@@ -186,7 +187,6 @@ async function cropFaceRegion(
 
   return { croppedUrl, remappedLandmarks }
 }
-
 // ── 动画完成回调 ──
 function handleAnimationComplete() {
   showResult.value = true
