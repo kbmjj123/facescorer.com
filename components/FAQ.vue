@@ -59,26 +59,11 @@ const faqItems = [
             </div>
           </div>
 
-          <!-- Ad slot between Q3 and Q4 -->
-          <div
-            v-if="i === 2"
-            class="ad-slot border-b border-border-light"
-            data-ad-position="faq-middle"
-            style="min-height: 120px; background: #F5F5F7; border-radius: 8px; display: flex; align-items: center; justify-content: center; margin: 16px 0;"
-          >
-            <span style="color: #98989D; font-size: 12px;">Advertisement</span>
-          </div>
+          <AdSlot v-if="i === 2" position="faq-middle" />
         </template>
       </div>
 
-      <!-- Ad slot below FAQ -->
-      <div
-        class="ad-slot mt-8"
-        data-ad-position="below-faq"
-        style="min-height: 120px; background: #F5F5F7; border-radius: 8px; display: flex; align-items: center; justify-content: center;"
-      >
-        <span style="color: #98989D; font-size: 12px;">Advertisement</span>
-      </div>
+      <AdSlot position="below-faq" />
     </div>
   </section>
 </template>

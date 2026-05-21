@@ -229,14 +229,7 @@ const supportsShare = computed(() => typeof navigator !== 'undefined' && !!navig
         </button>
       </div>
 
-      <!-- Ad slot -->
-      <div
-        class="ad-slot mt-8 max-w-[360px] mx-auto"
-        data-ad-position="below-share"
-        style="min-height: 100px; background: #F5F5F7; border-radius: 8px; display: flex; align-items: center; justify-content: center;"
-      >
-        <span style="color: #98989D; font-size: 12px;">Advertisement</span>
-      </div>
+      <AdSlot position="below-share" />
     </div>
   </section>
 </template>

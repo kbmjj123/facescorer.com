@@ -46,6 +46,12 @@ export default defineNuxtConfig({
     },
   },
 
+  runtimeConfig: {
+    public: {
+      adsensePublisher: process.env.NUXT_PUBLIC_ADSENSE_PUBLISHER || '',
+    },
+  },
+
   app: {
     head: {
       title: 'FaceScorer — AI Face Analysis, 100% Private',
