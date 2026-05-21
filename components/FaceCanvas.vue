@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps<{
   imageUrl: string
   landmarks: Array<{ x: number; y: number }>
-  canvasWidth: number
-  canvasHeight: number
   playing: boolean
 }>()
 
@@ -13,263 +11,343 @@ const emit = defineEmits<{ animationComplete: [] }>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
+const imageRef = ref<HTMLImageElement | null>(null)
 const imageLoaded = ref(false)
 
+const renderWidth = ref(0)
+const renderHeight = ref(0)
+const containerReady = ref(false)  // ← 新增：容器尺寸就绪标志
+
+let resizeObs: ResizeObserver | null = null
+
+onMounted(() => {
+  resizeObs = new ResizeObserver(entries => {
+    const entry = entries[0]
+    if (!entry) return
+    renderWidth.value = entry.contentRect.width
+    renderHeight.value = entry.contentRect.height
+    if (renderWidth.value > 0 && renderHeight.value > 0) {
+      containerReady.value = true  // ← 容器尺寸就绪
+      // 如果动画已经跑完，resize 时重新初始化 canvas 尺寸
+      if (phase.value === 'done' || phase.value === 'landmarks') {
+        nextTick(() => initCanvas())
+      }
+    }
+  })
+  if (containerRef.value) resizeObs.observe(containerRef.value)
+})
+
+onBeforeUnmount(() => {
+  resizeObs?.disconnect()
+  if (animFrame) cancelAnimationFrame(animFrame)
+})
+
+function initCanvas() {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = renderWidth.value * dpr
+  canvas.height = renderHeight.value * dpr
+  canvas.style.width = `${renderWidth.value}px`
+  canvas.style.height = `${renderHeight.value}px`
+  const ctx = canvas.getContext('2d')
+  ctx?.setTransform(dpr, 0, 0, dpr, 0, 0)
+}
+
+// ── object-contain 实际渲染区域 ──
+function getImageRenderRect() {
+  const img = imageRef.value
+  const containerW = renderWidth.value
+  const containerH = renderHeight.value
+
+  if (!img || !img.naturalWidth || !img.naturalHeight) {
+    return { x: 0, y: 0, w: containerW, h: containerH }
+  }
+
+  const containerRatio = containerW / containerH
+  const imgRatio = img.naturalWidth / img.naturalHeight
+  let renderW: number, renderH: number
+
+  if (imgRatio > containerRatio) {
+    renderW = containerW
+    renderH = containerW / imgRatio
+  } else {
+    renderH = containerH
+    renderW = containerH * imgRatio
+  }
+
+  return {
+    x: (containerW - renderW) / 2,
+    y: (containerH - renderH) / 2,
+    w: renderW,
+    h: renderH,
+  }
+}
+
+function toPixel(p: { x: number; y: number }) {
+  const rect = getImageRenderRect()
+  return {
+    x: rect.x + p.x * rect.w,
+    y: rect.y + p.y * rect.h,
+  }
+}
+
+// ── 动画状态 ──
 type Phase = 'idle' | 'landmarks' | 'lines' | 'done'
 const phase = ref<Phase>('idle')
-const revealedIndices = ref<Set<number>>(new Set())
+const revealedAt = ref<Map<number, number>>(new Map())  // index → 出现时间
 const lineProgress = ref([false, false, false, false])
 const linePhase = ref(0)
+let animFrame: number | null = null
 
-// ── Sort landmarks by distance from face center ──
+const FADE_DURATION = 300
+
+function easeOut(t: number): number {
+  return 1 - Math.pow(1 - t, 3)
+}
+
+// ── 排序 ──
 function distFromCenter(p: { x: number; y: number }): number {
-  let cx = 0.5, cy = 0.45
   const pts = props.landmarks
-  if (pts.length > 0) {
-    // Use actual mean center of all points
-    let sx = 0, sy = 0
-    for (const pt of pts) { sx += pt.x; sy += pt.y }
-    cx = sx / pts.length
-    cy = sy / pts.length
-  }
+  if (!pts.length) return 0
+  let sx = 0, sy = 0
+  for (const pt of pts) { sx += pt.x; sy += pt.y }
+  const cx = sx / pts.length
+  const cy = sy / pts.length
   return Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2)
 }
 
 const sortedLandmarks = computed(() =>
-  [...props.landmarks].sort((a, b) => distFromCenter(a) - distFromCenter(b)),
+  [...props.landmarks].sort((a, b) => distFromCenter(a) - distFromCenter(b))
 )
 
-// ── Canvas rendering ──
-const dpr = ref(1)
-
-function render() {
+// ── 渲染（接收当前时间用于 fade 计算）──
+function render(now: number) {
   const canvas = canvasRef.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  dpr.value = window.devicePixelRatio || 1
-
-  canvas.width = props.canvasWidth * dpr.value
-  canvas.height = props.canvasHeight * dpr.value
-  canvas.style.width = `${props.canvasWidth}px`
-  canvas.style.height = `${props.canvasHeight}px`
-
-  ctx.setTransform(dpr.value, 0, 0, dpr.value, 0, 0)
-  ctx.clearRect(0, 0, props.canvasWidth, props.canvasHeight)
+  ctx.clearRect(0, 0, renderWidth.value, renderHeight.value)
 
   const pts = sortedLandmarks.value
-  const w = props.canvasWidth
-  const h = props.canvasHeight
-
   for (let i = 0; i < pts.length; i++) {
-    if (!revealedIndices.value.has(i)) continue
-    const p = pts[i]!
-    const px = p.x * w
-    const py = p.y * h
+    const appearedAt = revealedAt.value.get(i)
+    if (appearedAt === undefined) continue
+
+    const fadeProgress = Math.min(1, (now - appearedAt) / FADE_DURATION)
+    const alpha = easeOut(fadeProgress)
+
+    const { x, y } = toPixel(pts[i]!)
 
     ctx.beginPath()
-    ctx.arc(px, py, 2.5, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(255,255,255,0.4)'
+    ctx.arc(x, y, 2.5, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(255,255,255,${0.4 * alpha})`
     ctx.fill()
 
     ctx.beginPath()
-    ctx.arc(px, py, 1.5, 0, Math.PI * 2)
-    ctx.fillStyle = 'rgba(228,91,60,0.85)'
+    ctx.arc(x, y, 1.5, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(228,91,60,${0.85 * alpha})`
     ctx.fill()
   }
 }
 
-// ── Get key landmark position in canvas coords ──
-function lm(idx: number): { x: number; y: number } | null {
-  const p = props.landmarks[idx]
-  if (!p) return null
-  return { x: p.x * props.canvasWidth, y: p.y * props.canvasHeight }
-}
-
-// ── Line guides from real landmarks ──
-const lineGuides = computed(() => {
-  const w = props.canvasWidth || 400
-  const h = props.canvasHeight || 400
-
-  const nose = lm(1)         // nose tip
-  const forehead = lm(10)    // hairline
-  const chin = lm(152)       // chin
-  const leo = lm(33)         // left eye outer
-  const rei = lm(362)        // right eye inner
-  const lmc = lm(61)         // left mouth
-  const rmc = lm(291)        // right mouth
-
-  const cx = nose?.x ?? w * 0.5
-  const top = forehead?.y ?? h * 0.08
-  const bot = chin?.y ?? h * 0.85
-
-  // Eye line y: use average of eye and eyebrow landmarks around eyes
-  const eyeY = leo?.y ?? h * 0.38
-  const noseY = nose?.y ?? h * 0.52
-
-  const lx = Math.min(leo?.x ?? w * 0.12, lmc?.x ?? w * 0.2) - 20
-  const rx = Math.max(rei?.x ?? w * 0.88, rmc?.x ?? w * 0.8) + 20
-
-  return {
-    line1: { x1: cx, y1: top, x2: cx, y2: bot },
-    line2: { x1: lx, y1: eyeY, x2: rx, y2: eyeY },
-    line3: { x1: lx, y1: noseY, x2: rx, y2: noseY },
-    line4: { x1: lx, y1: noseY + 14, x2: rx, y2: noseY + 14 },
-  }
-})
-
-// ── Animation ──
-let animFrame: number | null = null
-let startTime = 0
-
+// ── 动画主循环 ──
 function startAnimation() {
-  revealedIndices.value.clear()
+  console.log('landmarks count:', props.landmarks.length)
+  console.log('sortedLandmarks count:', sortedLandmarks.value.length)
+  if (animFrame) cancelAnimationFrame(animFrame)
+  initCanvas()
+  revealedAt.value.clear()
   linePhase.value = 0
   lineProgress.value = [false, false, false, false]
   phase.value = 'landmarks'
-  startTime = performance.now()
+
+  const startTime = performance.now()
 
   function tick(now: number) {
     const elapsed = now - startTime
     const pts = sortedLandmarks.value
     const total = pts.length
-    if (total === 0) return
+    if (!total) return
 
-    // Wave 1: 0–600ms, closest 33%
+    // 三波次扩散，记录每个点的出现时间
     const w1e = Math.floor(total * 0.33)
     const w1p = Math.min(1, elapsed / 600)
     for (let i = 0; i < w1e; i++) {
-      if (i / w1e <= w1p) revealedIndices.value.add(i)
+      if (!revealedAt.value.has(i) && i / w1e <= w1p) {
+        revealedAt.value.set(i, now)
+      }
     }
-
-    // Wave 2: 400–1000ms, middle 33–66%
     if (elapsed >= 400) {
       const w2s = Math.floor(total * 0.33)
       const w2e = Math.floor(total * 0.66)
       const w2p = Math.min(1, (elapsed - 400) / 600)
       for (let i = w2s; i < w2e; i++) {
-        if ((i - w2s) / (w2e - w2s) <= w2p) revealedIndices.value.add(i)
+        if (!revealedAt.value.has(i) && (i - w2s) / (w2e - w2s) <= w2p) {
+          revealedAt.value.set(i, now)
+        }
       }
     }
-
-    // Wave 3: 800–1800ms, outer 66–100%
     if (elapsed >= 800) {
       const w3s = Math.floor(total * 0.66)
       const w3p = Math.min(1, (elapsed - 800) / 1000)
       for (let i = w3s; i < total; i++) {
-        if ((i - w3s) / (total - w3s) <= w3p) revealedIndices.value.add(i)
+        if (!revealedAt.value.has(i) && (i - w3s) / (total - w3s) <= w3p) {
+          revealedAt.value.set(i, now)
+        }
       }
     }
 
-    render()
+    render(now)
 
-    if (elapsed < 1800) {
+    // 等最后一个点也 fade 完
+    if (elapsed < 1800 + FADE_DURATION) {
       animFrame = requestAnimationFrame(tick)
     } else {
       phase.value = 'lines'
-      setTimeout(startLines, 600)
+      // 不用 setTimeout，lines 出现由 CSS delay 控制
+      // 只需要切换 phase，让 SVG 进入 DOM，CSS 自动接管
+      lineProgress.value = [true, true, true, true]
     }
   }
 
   animFrame = requestAnimationFrame(tick)
 }
 
-function startLines() {
-  linePhase.value = 0
-  animateNextLine()
-}
-
-function animateNextLine() {
-  if (linePhase.value >= 4) {
-    setTimeout(() => {
-      phase.value = 'done'
-      emit('animationComplete')
-    }, 200)
-    return
+// ── SVG 辅助线坐标 + 长度 ──
+const lineGuides = computed(() => {
+  function len(x1: number, y1: number, x2: number, y2: number) {
+    return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
   }
-  lineProgress.value[linePhase.value] = true
-  setTimeout(() => {
-    linePhase.value++
-    animateNextLine()
-  }, 400)
+
+  const lmPx = (idx: number) => {
+    const p = props.landmarks[idx]
+    return p ? toPixel(p) : null
+  }
+
+  const nose     = lmPx(1)
+  const forehead = lmPx(10)
+  const chin     = lmPx(152)
+  const leo      = lmPx(33)
+  const rei      = lmPx(362)
+  const lmc      = lmPx(61)
+  const rmc      = lmPx(291)
+
+  const rect = getImageRenderRect()
+  const cx   = nose?.x      ?? rect.x + rect.w * 0.5
+  const top  = forehead?.y  ?? rect.y + rect.h * 0.08
+  const bot  = chin?.y      ?? rect.y + rect.h * 0.85
+  const eyeY = leo?.y       ?? rect.y + rect.h * 0.38
+  const noseY = nose?.y     ?? rect.y + rect.h * 0.52
+  const lx = Math.min(leo?.x ?? rect.x + rect.w * 0.12,
+                      lmc?.x ?? rect.x + rect.w * 0.2) - 20
+  const rx = Math.max(rei?.x ?? rect.x + rect.w * 0.88,
+                      rmc?.x ?? rect.x + rect.w * 0.8) + 20
+
+  return {
+    line1: { x1: cx, y1: top,        x2: cx, y2: bot,        len: len(cx, top, cx, bot) },
+    line2: { x1: lx, y1: eyeY,       x2: rx, y2: eyeY,       len: len(lx, eyeY, rx, eyeY) },
+    line3: { x1: lx, y1: noseY,      x2: rx, y2: noseY,      len: len(lx, noseY, rx, noseY) },
+    line4: { x1: lx, y1: noseY + 14, x2: rx, y2: noseY + 14, len: len(lx, noseY + 14, rx, noseY + 14) },
+  }
+})
+
+function onLastLineEnd() {
+  phase.value = 'done'
+  emit('animationComplete')
 }
 
-// ── Watch ──
+// ── Watch：三个条件全部就绪才启动 ──
 watch(
-  [() => props.imageUrl, () => props.playing],
-  ([url, play]) => {
-    if (url && play && props.landmarks.length > 0) {
+  [() => props.imageUrl, () => props.playing, imageLoaded, containerReady],
+  ([url, play, loaded, ready]) => {
+    if (url && play && loaded && ready && props.landmarks.length > 0) {
       nextTick(() => startAnimation())
     }
   },
-  { immediate: true },
+  { immediate: true }
 )
-
-onBeforeUnmount(() => {
-  if (animFrame) cancelAnimationFrame(animFrame)
-})
 </script>
 
 <template>
   <div
     ref="containerRef"
     class="relative w-full overflow-hidden rounded-xl border border-border bg-black"
-    :style="{ aspectRatio: `${canvasWidth} / ${canvasHeight}` }"
+    style="aspect-ratio: 3 / 4;"
   >
-    <!-- Photo layer -->
     <img
+      ref="imageRef"
       :src="imageUrl"
       alt=""
       class="absolute inset-0 w-full h-full object-contain"
       @load="imageLoaded = true"
-    >
+    />
 
-    <!-- Canvas overlay -->
     <canvas
-      v-if="imageUrl && imageLoaded"
+      v-if="imageLoaded && containerReady"
       ref="canvasRef"
-      class="absolute inset-0 w-full h-full"
+      class="absolute inset-0"
       style="pointer-events: none;"
     />
 
-    <!-- SVG measurement lines -->
     <svg
       v-if="phase === 'lines' || phase === 'done'"
-      class="absolute inset-0"
+      class="absolute inset-0 w-full h-full"
       style="pointer-events: none;"
-      :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`"
+      :viewBox="`0 0 ${renderWidth} ${renderHeight}`"
     >
-      <line v-if="lineProgress[0]"
+      <!-- 对称轴，delay 0 -->
+      <line
+        v-if="lineProgress[0]"
         :x1="lineGuides.line1.x1" :y1="lineGuides.line1.y1"
         :x2="lineGuides.line1.x2" :y2="lineGuides.line1.y2"
         stroke="#E45B3C" stroke-opacity="0.6" stroke-width="1.5"
-        stroke-dasharray="6 5" class="line-anim" />
-      <line v-if="lineProgress[1]"
+        stroke-dasharray="6 5"
+        :style="`--len:${lineGuides.line1.len};--delay:0ms`"
+        class="guide-line"
+      />
+      <!-- 眼线，delay 350ms -->
+      <line
+        v-if="lineProgress[1]"
         :x1="lineGuides.line2.x1" :y1="lineGuides.line2.y1"
         :x2="lineGuides.line2.x2" :y2="lineGuides.line2.y2"
         stroke="#E45B3C" stroke-opacity="0.5" stroke-width="1.5"
-        class="line-anim" />
-      <line v-if="lineProgress[2]"
+        :style="`--len:${lineGuides.line2.len};--delay:350ms`"
+        class="guide-line"
+      />
+      <!-- 鼻底线，delay 650ms -->
+      <line
+        v-if="lineProgress[2]"
         :x1="lineGuides.line3.x1" :y1="lineGuides.line3.y1"
         :x2="lineGuides.line3.x2" :y2="lineGuides.line3.y2"
         stroke="#E45B3C" stroke-opacity="0.5" stroke-width="1.5"
-        class="line-anim" />
-      <line v-if="lineProgress[3]"
+        :style="`--len:${lineGuides.line3.len};--delay:650ms`"
+        class="guide-line"
+      />
+      <!-- 第四线，delay 950ms，animationend 触发完成 -->
+      <line
+        v-if="lineProgress[3]"
         :x1="lineGuides.line4.x1" :y1="lineGuides.line4.y1"
         :x2="lineGuides.line4.x2" :y2="lineGuides.line4.y2"
         stroke="#E45B3C" stroke-opacity="0.4" stroke-width="1.5"
-        class="line-anim" />
+        :style="`--len:${lineGuides.line4.len};--delay:950ms`"
+        class="guide-line"
+        @animationend="onLastLineEnd"
+      />
     </svg>
   </div>
 </template>
 
 <style scoped>
-@keyframes lineReveal {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+.guide-line {
+  stroke-dasharray: calc(var(--len) * 1px);
+  stroke-dashoffset: calc(var(--len) * 1px);
+  animation: drawLine 280ms cubic-bezier(0.25, 0.46, 0.45, 0.94)
+             var(--delay) forwards;
 }
-.line-anim {
-  animation: lineReveal 400ms var(--ease-out, cubic-bezier(0.16,1,0.3,1)) forwards;
+
+@keyframes drawLine {
+  to { stroke-dashoffset: 0; }
 }
 </style>

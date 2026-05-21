@@ -163,8 +163,6 @@ function handleAnimationComplete() {
             <FaceCanvas
               :image-url="uploadedImage"
               :landmarks="realLandmarks"
-              :canvas-width="3"
-              :canvas-height="4"
               :playing="true"
               @animation-complete="handleAnimationComplete"
             />
