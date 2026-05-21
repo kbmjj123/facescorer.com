@@ -100,13 +100,23 @@ function render() {
   ctx.setTransform(dpr.value, 0, 0, dpr.value, 0, 0)
   ctx.clearRect(0, 0, props.canvasWidth, props.canvasHeight)
 
-  // Draw revealed points
+  // Draw revealed points — use face bounds for positioning
   const pts = sortedLandmarks.value
+  const fb = faceBounds.value
+  const w = props.canvasWidth
+  const h = props.canvasHeight
+
   for (let i = 0; i < pts.length; i++) {
     if (!revealedIndices.value.has(i)) continue
     const p = pts[i]!
-    const px = p.x * props.canvasWidth
-    const py = p.y * props.canvasHeight
+    let px: number, py: number
+    if (fb) {
+      px = ((p.x - fb.x) / fb.w) * w
+      py = ((p.y - fb.y) / fb.h) * h
+    } else {
+      px = p.x * w
+      py = p.y * h
+    }
 
     // White outer ring
     ctx.beginPath()
@@ -122,33 +132,84 @@ function render() {
   }
 }
 
-// ── Computed line positions from landmarks ──
-const lineGuides = computed(() => {
+// ── Face bounding box from real landmarks ──
+const faceBounds = computed(() => {
   const pts = allLandmarks.value.length > 0 ? allLandmarks.value : props.landmarks
+  if (pts.length === 0) return null
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
+  }
+  // Add 10% padding
+  const padW = (maxX - minX) * 0.1
+  const padH = (maxY - minY) * 0.1
+  return {
+    x: Math.max(0, minX - padW),
+    y: Math.max(0, minY - padH),
+    w: Math.min(1, maxX - minX + padW * 2),
+    h: Math.min(1, maxY - minY + padH * 2),
+  }
+})
+
+// ── Key landmark accessor ──
+function getPt(idx: number): { x: number; y: number } | null {
+  const pts = allLandmarks.value.length > 0 ? allLandmarks.value : props.landmarks
+  if (pts.length <= idx) return null
+  const p = pts[idx]
+  if (!p) return null
   const w = props.canvasWidth || 400
   const h = props.canvasHeight || 400
+  const fb = faceBounds.value
+  if (fb) {
+    return {
+      x: ((p.x - fb.x) / fb.w) * w,
+      y: ((p.y - fb.y) / fb.h) * h,
+    }
+  }
+  return { x: p.x * w, y: p.y * h }
+}
 
-  // Vertical center axis
-  const centerX = w * 0.5
+// ── Computed line positions from actual landmarks ──
+const lineGuides = computed(() => {
+  const w = props.canvasWidth || 400
+  const h = props.canvasHeight || 400
+  const fb = faceBounds.value
 
-  // Find eye-level y (dense horizontal band around y~0.38-0.42 in normalized)
-  const eyeY = h * 0.38
+  // Use real landmarks if available, otherwise fall back to ratios
+  const nose = getPt(1)         // nose tip → symmetry axis center
+  const forehead = getPt(10)    // hairline center
+  const chin = getPt(152)       // chin bottom
+  const leftEyeO = getPt(33)    // left eye outer
+  const leftEyeI = getPt(133)   // left eye inner
+  const rightEyeI = getPt(362)  // right eye inner
+  const rightEyeO = getPt(263)  // right eye outer
+  const leftMouth = getPt(61)   // left mouth corner
+  const rightMouth = getPt(291) // right mouth corner
 
-  // Find nose-bottom y (around y~0.52)
-  const noseY = h * 0.52
+  // Symmetry axis: through nose tip, top to bottom
+  const centerX = nose?.x ?? w * 0.5
+  const topY = forehead?.y ?? h * 0.08
+  const bottomY = chin?.y ?? h * 0.82
 
-  // Find chin y
-  const chinY = h * 0.78
+  // Eye line: across face at eye level
+  const eyeY = leftEyeO?.y ?? h * 0.38
+  const eyeLeftX = fb ? fb.x * w : w * 0.10
+  const eyeRightX = fb ? (fb.x + fb.w) * w : w * 0.90
 
-  // Left/right bounds for horizontal lines
-  const leftX = w * 0.22
-  const rightX = w * 0.78
+  // Nose line: bottom of nose
+  const noseY = nose?.y ?? h * 0.52
+  const mouthLeftX = leftMouth?.x ?? w * 0.30
+  const mouthRightX = rightMouth?.x ?? w * 0.70
 
   return {
-    line1: { x1: centerX, y1: h * 0.1, x2: centerX, y2: chinY },                                              // symmetry axis
-    line2: { x1: leftX, y1: eyeY, x2: rightX, y2: eyeY },                                                     // brow line
-    line3: { x1: leftX, y1: noseY, x2: rightX, y2: noseY },                                                   // nose line
-    line4: { x1: w * 0.15, y1: eyeY - h * 0.04, x2: w * 0.85, y2: eyeY + h * 0.1 },                         // five-eye guide
+    line1: { x1: centerX, y1: topY, x2: centerX, y2: bottomY },
+    line2: { x1: eyeLeftX, y1: eyeY, x2: eyeRightX, y2: eyeY },
+    line3: { x1: eyeLeftX, y1: noseY, x2: eyeRightX, y2: noseY },
+    line4: { x1: mouthLeftX, y1: noseY + 10, x2: mouthRightX, y2: noseY + 10 },
   }
 })
 
